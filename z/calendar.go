@@ -7,6 +7,7 @@ import (
 
 	"github.com/jinzhu/now"
 	"github.com/shopspring/decimal"
+	"github.com/spf13/viper"
 	// "github.com/gookit/color"
 )
 
@@ -144,7 +145,13 @@ func (calendar *Calendar) GetOutputForWeekCalendar(date time.Time, month int, we
 	var bars [][]string
 	totalHours := decimal.NewFromInt(0)
 
-	days := []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
+	// Set day order based on firstWeekDayMonday configuration
+	var days []string
+	if viper.GetBool("firstWeekDayMonday") {
+		days = []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
+	} else {
+		days = []string{"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
+	}
 	for _, day := range days {
 		dayHours := decimal.NewFromInt(0)
 
