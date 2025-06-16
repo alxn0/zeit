@@ -19,14 +19,47 @@ type EditableEntry struct {
 	Notes   string `json:"notes"`
 }
 
+var (
+	editLast bool
+)
+
 var editCmd = &cobra.Command{
 	Use:   "edit [id]",
 	Short: "Edit an entry using $EDITOR",
-	Long:  "Edit an entry by opening a temporary file in your $EDITOR with the entry data.",
-	Args:  cobra.ExactArgs(1),
+	Long:  "Edit an entry by opening a temporary file in your $EDITOR with the entry data. Use --last to edit the most recent entry.",
+	Args:  cobra.RangeArgs(0, 1),
 	Run: func(cmd *cobra.Command, args []string) {
 		user := GetCurrentUser()
-		id := args[0]
+		var id string
+
+		if editLast {
+			if len(args) > 0 {
+				fmt.Printf("%s Cannot specify both --last flag and entry ID\n", CharError)
+				os.Exit(1)
+			}
+			
+			// Get all entries and find the last one
+			entries, err := database.ListEntries(user)
+			if err != nil {
+				fmt.Printf("%s %+v\n", CharError, err)
+				os.Exit(1)
+			}
+			
+			if len(entries) == 0 {
+				fmt.Printf("%s No entries found\n", CharError)
+				os.Exit(1)
+			}
+			
+			// Get the last entry (entries are sorted by begin time)
+			lastEntry := entries[len(entries)-1]
+			id = lastEntry.ID
+		} else {
+			if len(args) == 0 {
+				fmt.Printf("%s Entry ID is required when --last flag is not used\n", CharError)
+				os.Exit(1)
+			}
+			id = args[0]
+		}
 
 		// Get the existing entry
 		entry, err := database.GetEntry(user, id)
@@ -204,4 +237,5 @@ func checkForOverlaps(user string, excludeID string, entry Entry) error {
 
 func init() {
 	rootCmd.AddCommand(editCmd)
+	editCmd.Flags().BoolVarP(&editLast, "last", "l", false, "Edit the last entry")
 }
