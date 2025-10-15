@@ -26,12 +26,14 @@ type reportLine struct {
 }
 
 var (
-	weeklyFlag  bool
-	monthlyFlag bool
-	notesFlag   bool
-	noTasksFlag bool
+	weeklyFlag    bool
+	monthlyFlag   bool
+	notesFlag     bool
+	noTasksFlag   bool
+	byProjectFlag bool
 )
 var dailyReport map[string]map[string]map[string]reportLine
+var projectReport map[string]map[string]reportLine
 
 var reportCmd = &cobra.Command{
 	Use:   "report",
@@ -42,7 +44,11 @@ var reportCmd = &cobra.Command{
 			listRange = viper.GetString("report.default")
 		}
 
-		dailyReport = make(map[string]map[string]map[string]reportLine)
+		if byProjectFlag {
+			projectReport = make(map[string]map[string]reportLine)
+		} else {
+			dailyReport = make(map[string]map[string]map[string]reportLine)
+		}
 
 		if weeklyFlag {
 			viper.Set("report.weeklySum", true)
@@ -76,11 +82,17 @@ var reportCmd = &cobra.Command{
 			reportEntries = append(reportEntries, reportEntry{dateString, fe.Project, fe.Task, entryDuration, fe.Notes, running})
 		}
 
-		for _, re := range reportEntries {
-			dailyReporting(re)
+		if byProjectFlag {
+			for _, re := range reportEntries {
+				projectReporting(re)
+			}
+			outputByProject()
+		} else {
+			for _, re := range reportEntries {
+				dailyReporting(re)
+			}
+			output()
 		}
-
-		output()
 	},
 }
 
@@ -96,6 +108,7 @@ func init() {
 	reportCmd.PersistentFlags().BoolVar(&monthlyFlag, "monthly", false, "Print summary of monthly hours")
 	reportCmd.PersistentFlags().BoolVar(&notesFlag, "notes", false, "Print notes for the task")
 	reportCmd.PersistentFlags().BoolVar(&noTasksFlag, "no-tasks", false, "Print only summary bot no task details")
+	reportCmd.PersistentFlags().BoolVar(&byProjectFlag, "by-project", false, "Group report by project instead of by day")
 
 	flagName := "task"
 	reportCmd.RegisterFlagCompletionFunc(flagName, func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -135,6 +148,29 @@ func dailyReporting(re reportEntry) {
 	workEntry.Duration += re.Duration
 	workEntry.Notes = append(workEntry.Notes, re.Notes)
 	dailyReport[re.Date][re.Project][re.Task] = workEntry
+}
+
+func projectReporting(re reportEntry) {
+	_, ok := projectReport[re.Project]
+	if !ok {
+		projectReport[re.Project] = make(map[string]reportLine)
+		projectReport[re.Project][re.Task] = reportLine{Duration: re.Duration, Notes: []string{re.Notes}, Running: re.Running}
+		return
+	}
+
+	_, ok = projectReport[re.Project][re.Task]
+	if !ok {
+		projectReport[re.Project][re.Task] = reportLine{Duration: re.Duration, Notes: []string{re.Notes}, Running: re.Running}
+		return
+	}
+
+	workEntry := projectReport[re.Project][re.Task]
+	if workEntry.Running || re.Running {
+		workEntry.Running = true
+	}
+	workEntry.Duration += re.Duration
+	workEntry.Notes = append(workEntry.Notes, re.Notes)
+	projectReport[re.Project][re.Task] = workEntry
 }
 
 func output() {
@@ -207,6 +243,39 @@ func output() {
 	}
 }
 
+func outputByProject() {
+	grandTotal := 0.0
+
+	for _, projectKey := range projectKeysForProjectReport() {
+		projectSum := 0.0
+		fmt.Println("\nProject:", projectKey)
+
+		for _, taskKey := range taskKeysForProjectReport(projectKey) {
+			if !viper.GetBool("report.no-tasks") {
+				color.FgLightWhite.Print("        ", fmtDuration(time.Duration(projectReport[projectKey][taskKey].Duration*float64(time.Second))), " ", taskKey)
+				if projectReport[projectKey][taskKey].Running {
+					color.FgLightYellow.Println(" (running)")
+				} else {
+					fmt.Println()
+				}
+				if viper.GetBool("report.notes") {
+					for _, note := range projectReport[projectKey][taskKey].Notes {
+						if len(note) > 0 {
+							color.FgLightBlue.Println("                    ", note)
+						}
+					}
+				}
+			}
+			projectSum += projectReport[projectKey][taskKey].Duration
+		}
+
+		fmt.Println("    Total:", fmtDuration(time.Duration(projectSum*float64(time.Second))))
+		grandTotal += projectSum
+	}
+
+	fmt.Println("\nGrand Total:", fmtDuration(time.Duration(grandTotal*float64(time.Second))))
+}
+
 func dialyKeys() []string {
 	keys := make([]string, 0, len(dailyReport))
 
@@ -235,6 +304,30 @@ func taskKeys(daily string, project string) []string {
 	keys := make([]string, 0, len(dailyReport[daily][project]))
 
 	for k := range dailyReport[daily][project] {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	return keys
+}
+
+func projectKeysForProjectReport() []string {
+	keys := make([]string, 0, len(projectReport))
+
+	for k := range projectReport {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	return keys
+}
+
+func taskKeysForProjectReport(project string) []string {
+	keys := make([]string, 0, len(projectReport[project]))
+
+	for k := range projectReport[project] {
 		keys = append(keys, k)
 	}
 
